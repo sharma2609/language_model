@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+torchaudio
+streamlit
+transformers
+sentencepiece
+accelerate
+sacremoses
+aksharamukha
+faster-whisper
+pydub
+gTTS
+langdetect
