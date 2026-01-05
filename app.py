@@ -23,28 +23,45 @@ st.set_page_config(
 def load_translation_model():
     """Loads and caches the NLLB translation model and tokenizer."""
     model_name = "facebook/nllb-200-distilled-600M"
-    st.write(f"Loading translation model: {model_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-    st.write("Translation model loaded successfully.")
-    return tokenizer, model
+    try:
+        st.write(f"Loading translation model: {model_name}...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            low_cpu_mem_usage=True
+        )
+        st.write("Translation model loaded successfully.")
+        return tokenizer, model
+    except Exception as e:
+        st.error(f"Failed to load translation model: {e}")
+        st.info("Consider using a smaller model or Hugging Face Inference API for deployment.")
+        return None, None
 
 # Cache the speech-to-text model
 @st.cache_resource
 def load_stt_model():
     """Loads and caches the Whisper speech-to-text model."""
-    model_size = "base" # CHANGED: Was "small", "base" is much faster
-    st.write(f"Loading speech-to-text model: Whisper ({model_size})...")
-    # Check for GPU availability
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    compute_type = "float16" if torch.cuda.is_available() else "int8"
-    whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
-    st.write("Speech-to-text model loaded successfully.")
-    return whisper_model
+    model_size = "tiny"  # Changed from "base" to "tiny" for deployment
+    try:
+        st.write(f"Loading speech-to-text model: Whisper ({model_size})...")
+        # Force CPU for deployment compatibility
+        device = "cpu"  # Force CPU for Streamlit Cloud
+        compute_type = "int8"
+        whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        st.write("Speech-to-text model loaded successfully.")
+        return whisper_model
+    except Exception as e:
+        st.error(f"Failed to load speech-to-text model: {e}")
+        return None
 
-# Load models
-tokenizer, model = load_translation_model()
-whisper_model = load_stt_model()
+# Load models with error handling
+try:
+    tokenizer, model = load_translation_model()
+    whisper_model = load_stt_model()
+except Exception as e:
+    st.error(f"Model loading failed: {e}")
+    tokenizer, model, whisper_model = None, None, None
 
 # --- Language and Task Dictionaries ---
 
@@ -76,17 +93,27 @@ def translate(text, src_lang_code, tgt_lang_code, max_length=512):
     """Translates text using the loaded NLLB model."""
     if not text.strip():
         return ""
-    tokenizer.src_lang = src_lang_code
-    inputs = tokenizer(text, return_tensors="pt")
     
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    translated_tokens = model.generate(
-        **inputs.to(device),
-        forced_bos_token_id=tokenizer.convert_tokens_to_ids(tgt_lang_code), # FIXED THIS LINE
-        max_length=max_length
-    )
-    result = tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)[0]
-    return result
+    if tokenizer is None or model is None:
+        return "Translation model not available. Please check deployment configuration."
+    
+    try:
+        tokenizer.src_lang = src_lang_code
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        
+        # Force CPU for deployment
+        device = "cpu"
+        translated_tokens = model.generate(
+            **inputs.to(device),
+            forced_bos_token_id=tokenizer.convert_tokens_to_ids(tgt_lang_code),
+            max_length=max_length,
+            num_beams=1,  # Reduce computational load
+            do_sample=False
+        )
+        result = tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)[0]
+        return result
+    except Exception as e:
+        return f"Translation failed: {str(e)}"
 
 def transliterate_text(text, src_lang, tgt_lang):
     """Transliterates text between Hindi (Devanagari) and English (Latin)."""
@@ -100,10 +127,16 @@ def transliterate_text(text, src_lang, tgt_lang):
 
 def speech_to_text(audio_path):
     """Transcribes audio file to text using Whisper."""
-    segments, info = whisper_model.transcribe(audio_path, beam_size=5)
-    detected_lang = info.language
-    transcribed_text = "".join([segment.text for segment in segments]).strip()
-    return transcribed_text, detected_lang
+    if whisper_model is None:
+        return "Speech-to-text model not available.", "unknown"
+    
+    try:
+        segments, info = whisper_model.transcribe(audio_path, beam_size=1)  # Reduce beam size
+        detected_lang = info.language
+        transcribed_text = "".join([segment.text for segment in segments]).strip()
+        return transcribed_text, detected_lang
+    except Exception as e:
+        return f"Transcription failed: {str(e)}", "unknown"
 
 def text_to_speech(text, lang_name):
     """Converts text to speech using gTTS and returns the audio file path."""
