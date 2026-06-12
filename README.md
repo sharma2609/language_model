@@ -1,144 +1,80 @@
 # Multilingual AI Translator & Transliterator
 
-A Streamlit application that provides translation and transliteration capabilities across multiple languages using AI models. The app supports both text input and audio transcription with speech synthesis output.
+A Streamlit application that provides real-time translation, transliteration, speech-to-text, and text-to-speech across five languages using local AI models.
 
 ## Features
 
-- **Translation**: Translate text between English, Hindi, Japanese, Chinese (Simplified), and Russian
-- **Transliteration**: Convert text between Hindi (Devanagari) and English (Latin) scripts
-- **Speech-to-Text**: Upload audio files for automatic transcription
-- **Text-to-Speech**: Generate audio output for translated/transliterated text
-- **Multi-language Support**: Detect and process multiple languages
+| Capability | Details |
+|---|---|
+| **Translation** | English, Hindi, Japanese, Chinese (Simplified), Russian |
+| **Transliteration** | Hindi (Devanagari) ↔ English (Latin) |
+| **Speech-to-Text** | Upload audio — auto-transcribe with language detection |
+| **Text-to-Speech** | Play translated/transliterated output as speech |
 
-## Available Versions
+## Tech Stack
 
-### 1. Full Version (`app.py`)
-
-Uses local AI models for maximum functionality:
-
-- **Translation**: Facebook NLLB-200 model
-- **Speech Recognition**: OpenAI Whisper model
-- **Pros**: Full offline functionality, high accuracy
-- **Cons**: High memory usage (~3GB+), slower startup
-
-### 2. Lightweight Version (`app_lightweight.py`)
-
-API-based approach optimized for cloud deployment:
-
-- **Translation**: Hugging Face Inference API
-- **Speech Recognition**: Removed (text-only)
-- **Pros**: Low memory usage, fast startup, cloud-friendly
-- **Cons**: Requires API tokens, internet dependency
+| Component | Model / Library |
+|---|---|
+| Translation | [Facebook NLLB-200 Distilled 600M](https://huggingface.co/facebook/nllb-200-distilled-600M) |
+| Speech-to-Text | [OpenAI Whisper tiny](https://github.com/guillaumekln/faster-whisper) (via faster-whisper) |
+| Text-to-Speech | [Google TTS (gTTS)](https://github.com/pndurette/gTTS) |
+| Transliteration | [Aksharamukha](https://github.com/virtualvinodh/aksharamukha) |
+| Framework | [Streamlit](https://streamlit.io) |
 
 ## Quick Start
 
-### Local Development
+### Prerequisites
+
+- Python 3.10+
+- FFmpeg (`apt install ffmpeg` on Ubuntu, `brew install ffmpeg` on macOS)
+
+### Installation
 
 ```bash
-# Clone the repository
 git clone <repository-url>
 cd <repository-name>
-
-# Install dependencies (full version)
 pip install -r requirements.txt
+```
 
-# Or install lightweight dependencies
-pip install -r requirements_lightweight.txt
+### Run
 
-# Run the application
+```bash
 streamlit run app.py
-# Or run lightweight version
-streamlit run app_lightweight.py
 ```
 
-### Streamlit Cloud Deployment
+Models are downloaded on first use (~1.5 GB). After caching, subsequent starts are instant.
 
-#### Option 1: Lightweight Version (Recommended)
+## Usage
 
-1. Use `app_lightweight.py` as your main file
-2. Use `requirements_lightweight.txt` for dependencies
-3. Add `packages.txt` for system dependencies
-4. Deploy directly to Streamlit Cloud
+1. Select **Translate** or **Transliterate** in the sidebar.
+2. Choose source and target languages.
+3. Type text or upload an audio file for transcription.
+4. Click **Process** to get the result.
+5. Click **Generate Audio** to hear the output spoken aloud.
+6. Use **Clear Results** to reset.
 
-#### Option 2: Full Version (Advanced)
-
-1. Use `app.py` as your main file
-2. Use `requirements.txt` for dependencies
-3. Add `packages.txt` for system dependencies
-4. May require memory optimization or paid hosting
-
-## Configuration
-
-### System Dependencies (`packages.txt`)
+## Project Structure
 
 ```
-ffmpeg
-libsndfile1
+├── app.py              # Main application
+├── requirements.txt    # Python dependencies
+├── packages.txt        # System dependencies (FFmpeg, libsndfile)
+├── .gitattributes      # Git configuration
+└── README.md           # This file
 ```
 
-### Environment Variables (Optional)
+## Deployment
 
-For the lightweight version with full API functionality:
+**Streamlit Cloud** — Set `app.py` as entry point and include `packages.txt`. A GPU-backed or high-memory plan is recommended due to model size (~3 GB RAM at inference).
 
-```
-HF_TOKEN=your_hugging_face_api_token
-```
+**Docker** — Use a CUDA base image and install both Python and system dependencies listed in `packages.txt`.
 
-## Supported Languages
+## Performance Notes
 
-| Language             | Translation | Transliteration      | TTS Support |
-| -------------------- | ----------- | -------------------- | ----------- |
-| English              | ✅          | ✅ (to/from Hindi)   | ✅          |
-| Hindi                | ✅          | ✅ (to/from English) | ✅          |
-| Japanese             | ✅          | ❌                   | ✅          |
-| Chinese (Simplified) | ✅          | ❌                   | ✅          |
-| Russian              | ✅          | ❌                   | ✅          |
-
-## Technical Details
-
-### Models Used (Full Version)
-
-- **Translation**: `facebook/nllb-200-distilled-600M`
-- **Speech-to-Text**: `openai/whisper-tiny` (optimized for deployment)
-- **Text-to-Speech**: Google Text-to-Speech (gTTS)
-- **Transliteration**: Aksharamukha library
-
-### Memory Requirements
-
-- **Full Version**: ~3GB RAM (may exceed Streamlit Cloud limits)
-- **Lightweight Version**: ~100MB RAM (Streamlit Cloud compatible)
-
-## Troubleshooting
-
-### Common Deployment Issues
-
-1. **Memory errors**: Use lightweight version or upgrade hosting plan
-2. **Model loading timeouts**: Reduce model size or use API version
-3. **CUDA errors**: Ensure CPU-only PyTorch installation
-4. **Audio processing errors**: Verify `packages.txt` is included
-
-### Performance Optimization
-
-- Use `torch.float16` for GPU deployments
-- Implement model caching with `@st.cache_resource`
-- Reduce beam search parameters for faster inference
-- Use smaller model variants for deployment
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test both versions
-5. Submit a pull request
+- Models are cached via `@st.cache_resource` and only loaded on first translation/transcription request.
+- Whisper runs on CPU with `int8` quantization — transcription may be slower on resource-constrained environments.
+- The NLLB model uses greedy decoding (`num_beams=1`) to minimise memory and latency.
 
 ## License
 
-This project is open source. Please check individual model licenses for commercial use.
-
-## Acknowledgments
-
-- Facebook AI for NLLB translation models
-- OpenAI for Whisper speech recognition
-- Google for Text-to-Speech services
-- Aksharamukha for transliteration capabilities
+This project is open source. Review individual model licenses (NLLB-200, Whisper) for commercial use restrictions.
