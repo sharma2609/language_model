@@ -1,2 +1,3 @@
+# System dependencies for audio processing (installed via apt-get)
 ffmpeg
 libsndfile1

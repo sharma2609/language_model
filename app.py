@@ -6,7 +6,12 @@ from gtts import gTTS
 from aksharamukha import transliterate
 import tempfile
 import os
+import gc
+import atexit
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # --- App Configuration ---
 st.set_page_config(
@@ -50,7 +55,7 @@ GTT_LANG_MAP: dict[str, str] = {
 # --- Cached Model Loading (lazy — loaded on first use) ---
 
 @st.cache_resource(show_spinner="Loading translation model (~1.5GB)...")
-def load_translation_model():
+def load_translation_model() -> tuple:  # (AutoTokenizer, AutoModelForSeq2SeqLM)
     model_name = "facebook/nllb-200-distilled-600M"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -58,14 +63,16 @@ def load_translation_model():
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         low_cpu_mem_usage=True,
     )
+    if torch.cuda.is_available():
+        model = model.to("cuda")
     return tokenizer, model
 
 
 @st.cache_resource(show_spinner="Loading speech-to-text model (Whisper)...")
-def load_stt_model():
+def load_stt_model() -> WhisperModel:
     model_size = "tiny"
-    device = "cpu"
-    compute_type = "int8"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    compute_type = "float16" if torch.cuda.is_available() else "int8"
     return WhisperModel(model_size, device=device, compute_type=compute_type)
 
 
@@ -98,9 +105,11 @@ def translate(
 
     tokenizer.src_lang = src_lang_code
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+    device = next(model.parameters()).device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
     translated_tokens = model.generate(
-        **inputs.to("cpu"),
+        **inputs,
         forced_bos_token_id=tokenizer.convert_tokens_to_ids(tgt_lang_code),
         max_length=max_length,
         num_beams=1,
@@ -121,7 +130,7 @@ def transliterate_text(text: str, src_lang: str, tgt_lang: str) -> str:
     return text
 
 
-def speech_to_text(audio_path: str, whisper_model) -> tuple[str, str]:
+def speech_to_text(audio_path: str, whisper_model: WhisperModel) -> tuple[str, str]:
     segments, info = whisper_model.transcribe(audio_path, beam_size=1)
     detected_lang = info.language
     transcribed_text = "".join(segment.text for segment in segments).strip()
@@ -132,24 +141,45 @@ def text_to_speech(text: str, lang_name: str) -> Optional[str]:
     if not text.strip():
         return None
 
-    gtts_lang_code = GTT_LANG_MAP.get(lang_name, "en")
+    tts_lang_code = GTT_LANG_MAP.get(lang_name, "en")
     fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    tts = gTTS(text, lang=gtts_lang_code)
-    tts.save(fp.name)
+    try:
+        tts = gTTS(text, lang=tts_lang_code)
+        tts.save(fp.name)
+    except Exception:
+        _cleanup_audio_file(fp.name)
+        raise
+    _temp_audio_files.add(fp.name)
     return fp.name
 
 
 # --- Helper: clean up stale TTS temp file ---
 
+_temp_audio_files: set[str] = set()
+
+
+def _cleanup_audio_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except Exception as e:
+        logger.warning("Failed to remove temp file %s: %s", path, e)
+
+
 def _cleanup_audio_path():
     path = st.session_state.get("audio_path")
     if path:
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
+        _cleanup_audio_file(path)
+        _temp_audio_files.discard(path)
     st.session_state.audio_path = None
+
+
+def _cleanup_all_temp_files():
+    for path in list(_temp_audio_files):
+        _cleanup_audio_file(path)
+    _temp_audio_files.clear()
+
+
+atexit.register(_cleanup_all_temp_files)
 
 
 # --- Streamlit UI ---
@@ -238,7 +268,6 @@ with col1:
                         finally:
                             if audio_path and os.path.exists(audio_path):
                                 os.remove(audio_path)
-                            audio_path = None
 
             if final_input_text.strip():
                 with st.spinner(f"{task}ing..."):
@@ -263,6 +292,10 @@ with col1:
                         st.session_state.target_lang_for_tts = target_lang
                     except Exception as e:
                         st.error(f"{task} failed: {e}")
+                    finally:
+                        if torch.cuda.is_available():
+                            gc.collect()
+                            torch.cuda.empty_cache()
 
 with col2:
     st.header("Output")

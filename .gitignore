@@ -6,3 +6,12 @@ dist/
 .venv/
 venv/
 *.mp3
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.python-version
+*.so
+*.dylib
