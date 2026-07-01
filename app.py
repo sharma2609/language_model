@@ -137,22 +137,6 @@ def speech_to_text(audio_path: str, whisper_model: WhisperModel) -> tuple[str, s
     return transcribed_text, detected_lang
 
 
-def text_to_speech(text: str, lang_name: str) -> Optional[str]:
-    if not text.strip():
-        return None
-
-    tts_lang_code = GTT_LANG_MAP.get(lang_name, "en")
-    fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    try:
-        tts = gTTS(text, lang=tts_lang_code)
-        tts.save(fp.name)
-    except Exception:
-        _cleanup_audio_file(fp.name)
-        raise
-    _temp_audio_files.add(fp.name)
-    return fp.name
-
-
 # --- Helper: clean up stale TTS temp file ---
 
 _temp_audio_files: set[str] = set()
@@ -180,6 +164,22 @@ def _cleanup_all_temp_files():
 
 
 atexit.register(_cleanup_all_temp_files)
+
+
+def text_to_speech(text: str, lang_name: str) -> Optional[str]:
+    if not text.strip():
+        return None
+
+    tts_lang_code = GTT_LANG_MAP.get(lang_name, "en")
+    fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    try:
+        tts = gTTS(text, lang=tts_lang_code)
+        tts.save(fp.name)
+    except Exception:
+        _cleanup_audio_file(fp.name)
+        raise
+    _temp_audio_files.add(fp.name)
+    return fp.name
 
 
 # --- Streamlit UI ---
@@ -284,6 +284,11 @@ with col1:
                                 model,
                             )
                         else:
+                            if {source_lang, target_lang} != {"English", "Hindi"}:
+                                st.warning(
+                                    "Transliteration only supports English ↔ Hindi. "
+                                    "Returning original text."
+                                )
                             output_text = transliterate_text(
                                 final_input_text, source_lang, target_lang
                             )
